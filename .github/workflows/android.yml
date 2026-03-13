@@ -1,0 +1,306 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  JAVA_VERSION: '17'
+  ANDROID_SDK_VERSION: '34'
+  GRADLE_VERSION: '8.7'
+
+jobs:
+  # ============================================================================
+  # CODE QUALITY JOB
+  # ============================================================================
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run lint
+        run: ./gradlew lintDebug --no-daemon
+
+      - name: Upload lint reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lint-reports
+          path: app/build/reports/lint-results-debug.html
+
+  # ============================================================================
+  # UNIT TESTS JOB
+  # ============================================================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Publish unit test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Unit Tests
+          path: app/build/test-results/testDebugUnitTest/*.xml
+          reporter: java-junit
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+
+  # ============================================================================
+  # BUILD JOB
+  # ============================================================================
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: app/build/outputs/apk/debug/
+
+  # ============================================================================
+  # INSTRUMENTED TESTS JOB
+  # ============================================================================
+  instrumented-tests:
+    name: Instrumented Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+
+      - name: Accept Android licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Install Android system images
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-${{ env.ANDROID_SDK_VERSION }};google_apis;x86_64"
+
+      - name: Create AVD
+        run: |
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd --name "test-avd" --device "pixel_6" --system "system-images;android-${{ env.ANDROID_SDK_VERSION }};google_apis;x86_64" --sdcard 512M
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run instrumented tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          avd-name: test-avd
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+          script: ./gradlew connectedAndroidTest --no-daemon
+
+      - name: Publish instrumented test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Instrumented Tests
+          path: app/build/reports/androidTests/connected/**/*.xml
+          reporter: java-junit
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: instrumented-test-reports
+          path: app/build/reports/androidTests/
+
+  # ============================================================================
+  # BENCHMARK TESTS JOB
+  # ============================================================================
+  benchmark-tests:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+
+      - name: Accept Android licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Install Android system images
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "system-images;android-${{ env.ANDROID_SDK_VERSION }};google_apis;x86_64"
+
+      - name: Create AVD
+        run: |
+          echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd --name "benchmark-avd" --device "pixel_6" --system "system-images;android-${{ env.ANDROID_SDK_VERSION }};google_apis;x86_64" --sdcard 512M
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run benchmarks
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          avd-name: benchmark-avd
+          api-level: ${{ env.ANDROID_SDK_VERSION }}
+          script: ./gradlew benchmark --no-daemon
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: app/build/outputs/benchmark/
+
+  # ============================================================================
+  # NOTIFICATION JOB
+  # ============================================================================
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [build, instrumented-tests]
+    if: always()
+    steps:
+      - name: Check build status
+        run: |
+          if [[ "${{ needs.build.result }}" == "failure" ]]; then
+            echo "::warning ::Build failed"
+            exit 1
+          fi
+          if [[ "${{ needs.instrumented-tests.result }}" == "failure" ]]; then
+            echo "::warning ::Instrumented tests failed"
+            exit 1
+          fi
+          echo "::notice ::All checks passed!"

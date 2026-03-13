@@ -1,0 +1,312 @@
+package com.nexopos.desktop.ui.settings
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.nexopos.desktop.core.settings.KeyboardShortcutsManager
+import com.nexopos.desktop.core.settings.ShortcutAction
+import com.nexopos.desktop.ui.pos.PosTheme
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
+
+/**
+ * Keyboard Shortcuts Settings Screen
+ * Allows users to customize keyboard shortcuts without recompiling
+ */
+@Composable
+fun KeyboardShortcutsSettings(
+    onBack: () -> Unit
+) {
+    val manager = koinInject<KeyboardShortcutsManager>()
+    val shortcuts by manager.shortcuts.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    
+    var editingAction by remember { mutableStateOf<ShortcutAction?>(null) }
+    var showResetDialog by remember { mutableStateOf(false) }
+    
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Default.ArrowBack, "Back")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Keyboard Shortcuts",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = { showResetDialog = true },
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = PosTheme.Warning
+                        )
+                    ) {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Reset to Defaults")
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = PosTheme.SurfaceSoft
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = "Click on a shortcut to change its key binding. Changes are saved automatically.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            
+            items(ShortcutAction.values().toList()) { action ->
+                val shortcut = shortcuts[action]
+                if (shortcut != null) {
+                    ShortcutCard(
+                        shortcut = shortcut,
+                        isEditing = editingAction == action,
+                        onClick = { editingAction = action }
+                    )
+                }
+            }
+        }
+    }
+    
+    // Reset confirmation dialog
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            icon = { Icon(Icons.Default.Warning, null) },
+            title = { Text("Reset to Defaults") },
+            text = { Text("Are you sure you want to reset all keyboard shortcuts to their default values?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    manager.resetToDefaults()
+                    showResetDialog = false
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Shortcuts reset to defaults")
+                    }
+                }) {
+                    Text("Reset")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    
+    // Edit shortcut dialog
+    editingAction?.let { action ->
+        EditShortcutDialog(
+            action = action,
+            currentShortcut = shortcuts[action]!!,
+            onDismiss = { editingAction = null },
+            onSave = { newKey ->
+                val result = manager.updateShortcut(action, newKey)
+                result.fold(
+                    onSuccess = {
+                        editingAction = null
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Shortcut updated successfully")
+                        }
+                    },
+                    onFailure = { error ->
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Error: ${error.message}")
+                        }
+                    }
+                )
+            }
+        )
+    }
+}
+
+@Composable
+private fun ShortcutCard(
+    shortcut: com.nexopos.desktop.core.settings.KeyboardShortcut,
+    isEditing: Boolean,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isEditing) PosTheme.Highlight else MaterialTheme.colorScheme.surface
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = shortcut.description,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = shortcut.action.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            Surface(
+                color = if (isEditing) {
+                    PosTheme.Success
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+                shape = MaterialTheme.shapes.small
+            ) {
+                Text(
+                    text = shortcut.label,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (isEditing) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditShortcutDialog(
+    action: ShortcutAction,
+    currentShortcut: com.nexopos.desktop.core.settings.KeyboardShortcut,
+    onDismiss: () -> Unit,
+    onSave: (Key) -> Unit
+) {
+    var pressedKey by remember { mutableStateOf<Key?>(null) }
+    val focusRequester = remember { FocusRequester() }
+    
+    // Request focus when dialog opens
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Edit, null) },
+        title = { Text("Change Shortcut") },
+        text = {
+            // Focusable box to capture key events
+            Box(
+                modifier = Modifier
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key != Key.Escape) {
+                            pressedKey = event.key
+                            println("[KeyboardShortcuts] Captured key: ${event.key}")
+                            true
+                        } else false
+                    }
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Current: ${currentShortcut.label}")
+                    Text(currentShortcut.description)
+                    
+                    HorizontalDivider()
+                    
+                    Text(
+                        "Press a key to assign it to this action...",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    
+                    if (pressedKey != null) {
+                        Surface(
+                            color = PosTheme.Highlight,
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Text(
+                                text = "New: ${pressedKey.toString()}",
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    pressedKey?.let { onSave(it) }
+                },
+                enabled = pressedKey != null,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = PosTheme.Success,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}

@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- ========================================================================
+         NEXOPOS MOBILE APP - LINT CONFIGURATION
+         ========================================================================
+         
+         This lint configuration enforces code quality standards for the 
+         NexoPOS Android mobile app. Adjust severity levels as needed
+         for your development workflow.
+    -->
+
+    <!-- ========================================================================
+         SECURITY LINT CHECKS
+         ======================================================================== -->
+    
+    <!-- Warn about hardcoded text in layouts -->
+    <issue id="HardcodedText" severity="warning" />
+    
+    <!-- Error on insecure TrustAllX509TrustManager (security vulnerability) -->
+    <issue id="TrustAllX509TrustManager" severity="error" />
+    
+    <!-- Warn about allowing JavaScript execution in WebView -->
+    <issue id="SetJavaScriptEnabled" severity="warning" />
+    
+    <!-- Error on cleartext traffic allowed (security) -->
+    <issue id="CleartextTraffic" severity="error" />
+    
+    <!-- Warn about missing certificate pinning -->
+    <issue id="MissingPermission" severity="warning" />
+    
+    <!-- Error on potential SQL injection -->
+    <issue id="SQLiteString" severity="error" />
+    
+    <!-- Error on exposing sensitive data in logs -->
+    <issue id="LogNotTimber" severity="warning" />
+    
+    <!-- Warn about using encryption with weak algorithms -->
+    <issue id="Deprecated" severity="warning" />
+
+    <!-- ========================================================================
+         PERFORMANCE LINT CHECKS
+         ======================================================================== -->
+    
+    <!-- Warn about unused resources -->
+    <issue id="UnusedResources" severity="warning" />
+    
+    <!-- Warn about overdraw (painting the same pixel multiple times) -->
+    <issue id="Overdraw" severity="warning" />
+    
+    <!-- Warn about unnecessary layout hierarchy -->
+    <issue id="NestedScrolling" severity="warning" />
+    
+    <!-- Warn about using dp instead of sp for text -->
+    <issue id="SpUsage" severity="warning" />
+    
+    <!-- Error on static field leaks (memory leak) -->
+    <issue id="StaticFieldLeak" severity="error" />
+    
+    <!-- Warn about inefficient layout weights -->
+    <issue id="InefficientWeight" severity="warning" />
+    
+    <!-- Warn about missing layout IDs -->
+    <issue id="MissingId" severity="warning" />
+
+    <!-- ========================================================================
+         CORRECTNESS LINT CHECKS
+         ======================================================================== -->
+    
+    <!-- Error on calling new API methods without compatibility check -->
+    <issue id="NewApi" severity="error" />
+    
+    <!-- Warn about using inlined API constants -->
+    <issue id="InlinedApi" severity="warning" />
+    
+    <!-- Warn about checking obsolete SDK versions -->
+    <issue id="ObsoleteSdkInt" severity="warning" />
+    
+    <!-- Error on null pointer exceptions -->
+    <issue id="NullSafeMutableLiveData" severity="warning" />
+    
+    <!-- Warn about type mismatches -->
+    <issue id="WrongThread" severity="error" />
+    
+    <!-- Error on resource type mismatches -->
+    <issue id="ResourceType" severity="error" />
+
+    <!-- ========================================================================
+         USABILITY LINT CHECKS
+         ======================================================================== -->
+    
+    <!-- Warn about missing content descriptions for accessibility -->
+    <issue id="ContentDescription" severity="warning" />
+    
+    <!-- Warn about missing labels for input fields -->
+    <issue id="LabelFor" severity="warning" />
+    
+    <!-- Warn about small touch target sizes -->
+    <issue id="TouchTargetSizeCheck" severity="warning" />
+    
+    <!-- Warn about contrast ratio issues -->
+    <issue id="TextContrastCheck" severity="warning" />
+
+    <!-- ========================================================================
+         COMPOSE-SPECIFIC LINT CHECKS
+         ======================================================================== -->
+    
+    <!-- Warn about unstable collections in Compose -->
+    <issue id="UnrememberedMutableState" severity="error" />
+    
+    <!-- Warn about unused Material3 parameters -->
+    <issue id="UnusedMaterial3ScaffoldPaddingParameter" severity="warning" />
+
+    <!-- ========================================================================
+         ICONS AND GRAPHICS
+         ======================================================================== -->
+    
+    <!-- Warn about missing vector asset -->
+    <issue id="VectorPath" severity="warning" />
+    
+    <!-- Warn about large image files -->
+    <issue id="LargeVector" severity="warning" />
+
+    <!-- ========================================================================
+         KOTLIN-SPECIFIC LINT CHECKS
+         ======================================================================== -->
+    
+    <!-- Warn about unnecessary lateinit -->
+    <issue id="LateinitUsage" severity="warning" />
+    
+    <!-- Error on using mutable collections in immutable contexts -->
+    <issue id="ImmutableCollections" severity="warning" />
+
+    <!-- ========================================================================
+         SUPPRESSIONS FOR KNOWN ISSUES
+         ======================================================================== -->
+    
+    <!-- Suppress specific issues that are acceptable in certain contexts -->
+    <issue id="UnusedIds" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="OldTargetApi" severity="ignore" />
+
+</lint>

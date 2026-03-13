@@ -1,0 +1,457 @@
+{
+  "audit_metadata": {
+    "version": "1.0",
+    "date": "2025-12-10",
+    "auditor": "Senior Android Architect AI",
+    "project": "NexoPOS v5.0",
+    "total_issues": 14,
+    "critical_issues": 5,
+    "estimated_effort_hours": 120
+  },
+  "critical_fixes": [
+    {
+      "id": "CRIT-001",
+      "priority": "P0",
+      "title": "Remove blocking network call in ServiceLocator",
+      "file": "app/src/main/java/com/nexopos/mobile/core/network/ServiceLocator.kt",
+      "lines": [46],
+      "issue": "runBlocking() blocks main thread during HTTP client initialization",
+      "risk_level": "CRITICAL",
+      "impact": "ANR on Android, poor UX",
+      "estimated_hours": 2,
+      "action": "MODIFY",
+      "changes": [
+        {
+          "type": "ADD_FIELD",
+          "line": 25,
+          "code": "@Volatile\nprivate var cachedToken: String? = null"
+        },
+        {
+          "type": "MODIFY_FUNCTION",
+          "function": "authInterceptor",
+          "old_signature": "private fun authInterceptor(token: String)",
+          "new_signature": "private fun authInterceptor(repo: SettingsRepository)",
+          "implementation": "Get token from cache or settings lazily"
+        },
+        {
+          "type": "MODIFY_FUNCTION",
+          "function": "client",
+          "line": 44,
+          "remove": "val token = runBlocking { repo.tokenFlow.first() }",
+          "add": "// Token fetched lazily in interceptor"
+        },
+        {
+          "type": "MODIFY_FUNCTION",
+          "function": "clearApiCache",
+          "add_line": "cachedToken = null"
+        }
+      ],
+      "testing_required": [
+        "Verify API calls still work",
+        "Test token refresh scenario",
+        "Verify no ANR with StrictMode"
+      ]
+    },
+    {
+      "id": "CRIT-002",
+      "priority": "P0",
+      "title": "Implement proper database migrations",
+      "file": "app/src/main/java/com/nexopos/mobile/core/db/AppDatabase.kt",
+      "lines": [32, 55],
+      "issue": "fallbackToDestructiveMigration() deletes all user data on schema changes",
+      "risk_level": "CRITICAL",
+      "impact": "Users lose all offline orders on app update",
+      "estimated_hours": 4,
+      "action": "MODIFY",
+      "changes": [
+        {
+          "type": "MODIFY_ANNOTATION",
+          "line": 32,
+          "old": "version = 4",
+          "new": "version = 5"
+        },
+        {
+          "type": "ADD_MIGRATION",
+          "line": 45,
+          "migration_name": "MIGRATION_4_5",
+          "sql_commands": [
+            "CREATE TABLE products_new (...)",
+            "INSERT INTO products_new SELECT * FROM products",
+            "DROP TABLE products",
+            "ALTER TABLE products_new RENAME TO products",
+            "CREATE INDEX index_products_barcode ON products(barcode)",
+            "CREATE INDEX index_products_category_id ON products(category_id)"
+          ]
+        },
+        {
+          "type": "MODIFY_BUILDER",
+          "line": 55,
+          "remove": ".fallbackToDestructiveMigration()",
+          "add": ".addMigrations(MIGRATION_4_5)\n.fallbackToDestructiveMigrationOnDowngrade()"
+        }
+      ],
+      "testing_required": [
+        "Test migration with version 4 database",
+        "Verify all data preserved",
+        "Test rollback scenario"
+      ]
+    },
+    {
+      "id": "CRIT-003",
+      "priority": "P0",
+      "title": "Make base URL configurable",
+      "files": [
+        "app/src/main/java/com/nexopos/mobile/core/network/ServiceLocator.kt",
+        "app/src/main/java/com/nexopos/mobile/core/prefs/SettingsRepository.kt",
+        "desktop/src/main/kotlin/com/nexopos/desktop/core/prefs/Settings.kt"
+      ],
+      "issue": "Hardcoded http://localhost/ prevents connecting to real server",
+      "risk_level": "CRITICAL",
+      "impact": "Cannot use in production",
+      "estimated_hours": 1,
+      "action": "MODIFY",
+      "changes": [
+        {
+          "file": "SettingsRepository.kt",
+          "type": "ADD_FIELD",
+          "code": "val baseUrlFlow: Flow<String> = dataStore.data.map { prefs ->\n    prefs[BASE_URL_KEY] ?: \"https://api.nexopos.com/\"\n}"
+        },
+        {
+          "file": "ServiceLocator.kt",
+          "type": "MODIFY_FUNCTION",
+          "function": "getRetrofit",
+          "line": 84,
+          "old": ".baseUrl(\"http://localhost/\")",
+          "new": ".baseUrl(runBlocking { repo.baseUrlFlow.firstOrNull() ?: \"https://api.nexopos.com/\" })"
+        }
+      ]
+    },
+    {
+      "id": "CRIT-004",
+      "priority": "P0",
+      "title": "Switch to HTTPS protocol",
+      "files": ["All network configuration files"],
+      "issue": "HTTP protocol vulnerable to MITM attacks",
+      "risk_level": "CRITICAL",
+      "impact": "Credential theft, data interception",
+      "estimated_hours": 0.5,
+      "action": "FIND_REPLACE",
+      "changes": [
+        {
+          "type": "REGEX_REPLACE",
+          "pattern": "http://",
+          "replacement": "https://",
+          "files": ["**/*.kt"],
+          "exclude": ["**/test/**", "**/androidTest/**"]
+        }
+      ]
+    },
+    {
+      "id": "CRIT-005",
+      "priority": "P0",
+      "title": "Move shared models to :shared module",
+      "files": [
+        "app/src/main/java/com/nexopos/mobile/core/network/Models.kt",
+        "desktop/src/main/kotlin/com/nexopos/desktop/core/network/Models.kt"
+      ],
+      "issue": "60% code duplication - same models in both modules",
+      "risk_level": "HIGH",
+      "impact": "Maintenance nightmare, inconsistent behavior",
+      "estimated_hours": 8,
+      "action": "MOVE_AND_REFACTOR",
+      "changes": [
+        {
+          "type": "CREATE_FILE",
+          "path": "shared/src/main/kotlin/com/nexopos/shared/models/Product.kt",
+          "source": "app/.../Models.kt",
+          "models": ["Product", "UnitQuantity", "UnitDetail"]
+        },
+        {
+          "type": "CREATE_FILE",
+          "path": "shared/src/main/kotlin/com/nexopos/shared/models/Customer.kt",
+          "source": "app/.../Models.kt",
+          "models": ["Customer"]
+        },
+        {
+          "type": "CREATE_FILE",
+          "path": "shared/src/main/kotlin/com/nexopos/shared/models/Order.kt",
+          "source": "app/.../OrderModels.kt",
+          "models": ["CreateOrderRequest", "OrderProductRequest", "OrderPaymentRequest"]
+        },
+        {
+          "type": "UPDATE_IMPORTS",
+          "files": ["app/**/*.kt", "desktop/**/*.kt"],
+          "old_import": "com.nexopos.mobile.core.network.Product",
+          "new_import": "com.nexopos.shared.models.Product"
+        },
+        {
+          "type": "DELETE_FILE",
+          "path": "desktop/src/main/kotlin/com/nexopos/desktop/core/network/Models.kt",
+          "reason": "Duplicate - moved to :shared"
+        }
+      ]
+    }
+  ],
+  "high_priority_fixes": [
+    {
+      "id": "HIGH-001",
+      "priority": "P1",
+      "title": "Implement Koin dependency injection",
+      "estimated_hours": 16,
+      "action": "ADD_FRAMEWORK",
+      "files_affected": ["All modules"],
+      "steps": [
+        "Add Koin dependencies to build.gradle.kts",
+        "Create DI modules for repositories",
+        "Create DI modules for ViewModels",
+        "Replace ServiceLocator with Koin",
+        "Replace AppInitializer with Koin",
+        "Update all instantiation points"
+      ]
+    },
+    {
+      "id": "HIGH-002",
+      "priority": "P1",
+      "title": "Add ViewModel lifecycle management (Desktop)",
+      "file": "desktop/src/main/kotlin/com/nexopos/desktop/ui/pos/POSViewModel.kt",
+      "estimated_hours": 2,
+      "action": "MODIFY",
+      "changes": [
+        {
+          "type": "MODIFY_FIELD",
+          "line": 22,
+          "old": "private val scope = CoroutineScope(Dispatchers.Main)",
+          "new": "private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)"
+        },
+        {
+          "type": "ADD_FUNCTION",
+          "function": "onCleared",
+          "code": "fun onCleared() {\n    scope.cancel()\n    println(\"[POSViewModel] Cleared and cancelled coroutines\")\n}"
+        }
+      ]
+    },
+    {
+      "id": "HIGH-003",
+      "priority": "P1",
+      "title": "Add HTTP response caching",
+      "file": "app/src/main/java/com/nexopos/mobile/core/network/ServiceLocator.kt",
+      "estimated_hours": 3,
+      "action": "MODIFY",
+      "changes": [
+        {
+          "type": "ADD_DEPENDENCY",
+          "gradle_file": "app/build.gradle.kts",
+          "dependency": "implementation(\"com.squareup.okhttp3:okhttp-urlconnection:4.12.0\")"
+        },
+        {
+          "type": "MODIFY_FUNCTION",
+          "function": "client",
+          "add_interceptor": "Cache(context.cacheDir, 10 * 1024 * 1024)",
+          "add_cache_control": "CacheControl.Builder().maxAge(5, TimeUnit.MINUTES).build()"
+        }
+      ]
+    }
+  ],
+  "medium_priority_fixes": [
+    {
+      "id": "MED-001",
+      "priority": "P2",
+      "title": "Add input validation and sanitization",
+      "files": ["All ViewModel files"],
+      "estimated_hours": 4,
+      "action": "ADD_VALIDATION",
+      "validation_rules": {
+        "product_name": "Max 255 chars, no special chars",
+        "quantity": "Positive number, max 9999",
+        "price": "Positive number, max 999999.99",
+        "barcode": "Alphanumeric only, max 50 chars"
+      }
+    },
+    {
+      "id": "MED-002",
+      "priority": "P2",
+      "title": "Add foreign key constraints",
+      "file": "app/src/main/java/com/nexopos/mobile/core/db/entities/ProductEntity.kt",
+      "estimated_hours": 2,
+      "action": "MODIFY",
+      "changes": [
+        {
+          "type": "ADD_ANNOTATION",
+          "entity": "ProductEntity",
+          "annotation": "@ForeignKey(entity = CategoryEntity::class, parentColumns = [\"id\"], childColumns = [\"category_id\"], onDelete = ForeignKey.SET_NULL)"
+        }
+      ]
+    },
+    {
+      "id": "MED-003",
+      "priority": "P2",
+      "title": "Add transaction boundaries",
+      "files": ["All repository files"],
+      "estimated_hours": 6,
+      "action": "WRAP_IN_TRANSACTION",
+      "functions": [
+        "submitOrder",
+        "syncOrders",
+        "refreshProducts",
+        "updateCart"
+      ]
+    },
+    {
+      "id": "MED-004",
+      "priority": "P2",
+      "title": "Add cart size validation",
+      "file": "desktop/src/main/kotlin/com/nexopos/desktop/ui/pos/POSViewModel.kt",
+      "estimated_hours": 1,
+      "action": "MODIFY",
+      "changes": [
+        {
+          "type": "ADD_CONSTANT",
+          "name": "MAX_CART_SIZE",
+          "value": 100
+        },
+        {
+          "type": "MODIFY_FUNCTION",
+          "function": "addToCart",
+          "add_validation": "if (_cart.value.size >= MAX_CART_SIZE) throw IllegalStateException(\"Cart full\")"
+        }
+      ]
+    },
+    {
+      "id": "MED-005",
+      "priority": "P2",
+      "title": "Encrypt auth token storage",
+      "file": "app/src/main/java/com/nexopos/mobile/core/prefs/SettingsRepository.kt",
+      "estimated_hours": 3,
+      "action": "REPLACE_DATASTORE",
+      "changes": [
+        {
+          "type": "ADD_DEPENDENCY",
+          "dependency": "implementation(\"androidx.security:security-crypto:1.1.0-alpha06\")"
+        },
+        {
+          "type": "REPLACE_IMPLEMENTATION",
+          "old": "Context.dataStore",
+          "new": "EncryptedSharedPreferences"
+        }
+      ]
+    }
+  ],
+  "database_migration_plan": {
+    "current_version": 4,
+    "target_version": 5,
+    "migrations": [
+      {
+        "from": 4,
+        "to": 5,
+        "description": "Add foreign key constraints and indexes",
+        "sql_commands": [
+          "CREATE TABLE products_new (id INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL, barcode TEXT, barcode_type TEXT, sku TEXT, status TEXT, category_id INTEGER, unit_quantities_json TEXT, updated_at INTEGER NOT NULL, FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE SET NULL)",
+          "INSERT INTO products_new SELECT * FROM products",
+          "DROP TABLE products",
+          "ALTER TABLE products_new RENAME TO products",
+          "CREATE INDEX index_products_barcode ON products(barcode)",
+          "CREATE INDEX index_products_sku ON products(sku)",
+          "CREATE INDEX index_products_category_id ON products(category_id)"
+        ],
+        "rollback_plan": "Restore from backup",
+        "testing_steps": [
+          "Create test database with version 4 schema",
+          "Insert sample data",
+          "Run migration",
+          "Verify all data present",
+          "Verify foreign keys work",
+          "Verify indexes exist"
+        ]
+      }
+    ],
+    "backup_strategy": {
+      "before_migration": true,
+      "backup_location": "app_data/backups/",
+      "retention_days": 30
+    }
+  },
+  "testing_plan": {
+    "unit_tests": {
+      "target_coverage": 70,
+      "priority_classes": [
+        "POSViewModel",
+        "CartViewModel",
+        "ServiceLocator",
+        "Repositories"
+      ]
+    },
+    "integration_tests": {
+      "scenarios": [
+        "Complete POS flow (search → add to cart → checkout)",
+        "Offline order sync",
+        "Database migration",
+        "Token refresh"
+      ]
+    },
+    "manual_tests": {
+      "android": [
+        "Test on Android 13 device",
+        "Test with existing database",
+        "Test offline mode",
+        "Test barcode scanner"
+      ],
+      "desktop": [
+        "Test on H313 ARM device",
+        "Test USB hardware (scanner, printer, drawer)",
+        "Test with 2GB RAM constraint"
+      ]
+    }
+  },
+  "rollout_strategy": {
+    "phase_1": {
+      "name": "Critical fixes",
+      "duration_days": 7,
+      "changes": ["CRIT-001", "CRIT-002", "CRIT-003", "CRIT-004"],
+      "rollout": "Internal testing only"
+    },
+    "phase_2": {
+      "name": "Architecture refactoring",
+      "duration_days": 21,
+      "changes": ["CRIT-005", "HIGH-001", "HIGH-002", "HIGH-003"],
+      "rollout": "Beta testers (10% of users)"
+    },
+    "phase_3": {
+      "name": "Quality improvements",
+      "duration_days": 14,
+      "changes": ["MED-001", "MED-002", "MED-003", "MED-004", "MED-005"],
+      "rollout": "Gradual rollout (50% → 100%)"
+    }
+  },
+  "risk_mitigation": {
+    "data_loss": {
+      "probability": "MEDIUM",
+      "impact": "CRITICAL",
+      "mitigation": [
+        "Implement backup before migration",
+        "Test migration on copy of production database",
+        "Provide rollback mechanism",
+        "Add data validation after migration"
+      ]
+    },
+    "breaking_changes": {
+      "probability": "HIGH",
+      "impact": "HIGH",
+      "mitigation": [
+        "Use feature flags",
+        "Gradual rollout",
+        "Monitor crash reports",
+        "Quick rollback capability"
+      ]
+    },
+    "performance_regression": {
+      "probability": "LOW",
+      "impact": "MEDIUM",
+      "mitigation": [
+        "Benchmark before/after",
+        "Monitor app startup time",
+        "Monitor memory usage",
+        "A/B testing"
+      ]
+    }
+  }
+}
