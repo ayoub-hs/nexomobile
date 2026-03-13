@@ -1,45 +1,32 @@
-# NexoPOS Mobile
+# NexoPOS Mobile Clients
 
-Android and desktop point-of-sale clients for NexoPOS, built with Kotlin.
+Multi-platform clients for NexoPOS built in Kotlin. This repository contains the Android app, the Compose Desktop client, and a shared Kotlin module.
 
-## Modules
+**Modules**
+- `app/` Android app (Jetpack Compose)
+- `desktop/` Compose Desktop client
+- `shared/` Shared Kotlin models and interfaces
 
-- `app/`: Android application built with Jetpack Compose
-- `desktop/`: Compose Desktop client
-- `shared/`: Shared Kotlin business logic
-
-## Requirements
-
+**Requirements**
 - JDK 17
-- Android SDK for Android builds
+- Android SDK (minSdk 33, targetSdk 36)
 
-## Build
-
+**Build**
 ```bash
-./gradlew assembleDebug
+./gradlew :app:assembleDebug
+./gradlew :desktop:run
 ./gradlew :desktop:build
 ```
 
-## Test
+**Configuration**
+- Both clients require a NexoPOS base URL and a Sanctum token.
+- Android stores tokens in `EncryptedSharedPreferences` and settings in DataStore.
+- Desktop stores settings in Java Preferences and encrypts tokens with a local AES key.
 
-```bash
-./gradlew testDebugUnitTest
-./gradlew connectedAndroidTest
-```
+**Offline Support**
+- Android queues orders and stock adjustments locally and replays them via WorkManager.
+- Desktop queues orders in SQLite and retries sync in the order repository.
 
-## Configuration
-
-The clients are configured at runtime with your server URL and authentication token. Do not commit local SDK paths, tokens, keystores, generated build outputs, or release artifacts.
-
-## Project Docs
-
-- [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md)
-- [TESTING.md](TESTING.md)
-- [DESKTOP_README.md](DESKTOP_README.md)
-- [desktop/ARCHITECTURE.md](desktop/ARCHITECTURE.md)
-- [docs/MOBILE_API_SPECIFICATION.md](docs/MOBILE_API_SPECIFICATION.md)
-
-## Repository Status
-
-This cleanup removed internal planning, audit, and session documents so the repository contains only user-facing project documentation.
-
+**Docs**
+- Android details: `app/README.md`
+- Desktop details: `desktop/README.md`
