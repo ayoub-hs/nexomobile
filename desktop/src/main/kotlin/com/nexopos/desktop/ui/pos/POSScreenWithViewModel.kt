@@ -585,28 +585,8 @@ fun POSScreenWithViewModel(
             }
         }
     }
-    val quickAccessPageSize = 30
     var quickAccessPage by remember { mutableStateOf(0) }
-    val quickAccessPageCount = remember(quickAccessProducts) {
-        if (quickAccessProducts.isNotEmpty()) {
-            (quickAccessProducts.size + quickAccessPageSize - 1) / quickAccessPageSize
-        } else {
-            0
-        }
-    }
-    LaunchedEffect(quickAccessCategoryId, quickAccessProducts.size) {
-        quickAccessPage = 0
-    }
-    if (quickAccessPageCount > 0 && quickAccessPage >= quickAccessPageCount) {
-        quickAccessPage = quickAccessPageCount - 1
-    }
     val isQuickAccessCategoryActive = quickAccessCategoryId != 0L && quickAccessProducts.isNotEmpty()
-    val quickAccessRowProducts = if (isQuickAccessCategoryActive) {
-        val start = quickAccessPage * quickAccessPageSize
-        quickAccessProducts.drop(start).take(quickAccessPageSize)
-    } else {
-        quickProducts
-    }
     val quickAccessRowTitle = if (isQuickAccessCategoryActive) {
         quickAccessCategory?.name ?: "Produits rapides"
     } else {
@@ -617,7 +597,9 @@ fun POSScreenWithViewModel(
     } else {
         "Accès rapide caisse"
     }
-    val showQuickAccessPagination = isQuickAccessCategoryActive && quickAccessPageCount > 1
+    val quickAccessTileSize = 72.dp
+    val quickAccessTileSpacing = 6.dp
+    val quickAccessMaxRows = 3
 
     // Show register selection dialog on startup if no register is open
     LaunchedEffect(currentRegister, registers) {
@@ -1182,36 +1164,70 @@ fun POSScreenWithViewModel(
                             Spacer(modifier = Modifier.height(8.dp))
                         }
 
-                        if (quickAccessRowProducts.isNotEmpty()) {
-                            QuickProductsRow(
-                                title = quickAccessRowTitle,
-                                subtitle = quickAccessRowSubtitle,
-                                showAddButton = !isQuickAccessCategoryActive,
-                                showPagination = showQuickAccessPagination,
-                                pageIndex = quickAccessPage,
-                                pageCount = quickAccessPageCount,
-                                onPrevPage = {
-                                    if (quickAccessPage > 0) {
-                                        quickAccessPage -= 1
-                                    }
-                                },
-                                onNextPage = {
-                                    if (quickAccessPage + 1 < quickAccessPageCount) {
-                                        quickAccessPage += 1
-                                    }
-                                },
-                                products = quickAccessRowProducts,
-                                onProductClick = { product ->
-                                    beginManualProductSelection(product, null)
-                                },
-                                onOpenQuickProductDialog = {
-                                    if (!isQuickAccessCategoryActive) {
+                        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                            val columns = ((maxWidth + quickAccessTileSpacing) /
+                                (quickAccessTileSize + quickAccessTileSpacing))
+                                .toInt()
+                                .coerceAtLeast(1)
+                            val pageSize = if (isQuickAccessCategoryActive) {
+                                columns * quickAccessMaxRows
+                            } else {
+                                quickProducts.size
+                            }
+                            val pageCount = if (isQuickAccessCategoryActive && pageSize > 0) {
+                                (quickAccessProducts.size + pageSize - 1) / pageSize
+                            } else {
+                                1
+                            }
+                            val showQuickAccessPagination = isQuickAccessCategoryActive && pageCount > 1
+                            val quickAccessRowProducts = if (isQuickAccessCategoryActive) {
+                                val start = quickAccessPage * pageSize
+                                quickAccessProducts.drop(start).take(pageSize)
+                            } else {
+                                quickProducts
+                            }
+
+                            LaunchedEffect(quickAccessCategoryId, quickAccessProducts.size, columns) {
+                                quickAccessPage = 0
+                            }
+                            if (pageCount > 0 && quickAccessPage >= pageCount) {
+                                quickAccessPage = pageCount - 1
+                            }
+
+                            if (quickAccessRowProducts.isNotEmpty()) {
+                                QuickProductsRow(
+                                    title = quickAccessRowTitle,
+                                    subtitle = quickAccessRowSubtitle,
+                                    showAddButton = true,
+                                    showPagination = showQuickAccessPagination,
+                                    pageIndex = quickAccessPage,
+                                    pageCount = pageCount,
+                                    useSquareItems = isQuickAccessCategoryActive,
+                                    squareColumns = columns,
+                                    squareTileSize = quickAccessTileSize,
+                                    squareTileSpacing = quickAccessTileSpacing,
+                                    squareMaxRows = quickAccessMaxRows,
+                                    onPrevPage = {
+                                        if (quickAccessPage > 0) {
+                                            quickAccessPage -= 1
+                                        }
+                                    },
+                                    onNextPage = {
+                                        if (quickAccessPage + 1 < pageCount) {
+                                            quickAccessPage += 1
+                                        }
+                                    },
+                                    products = quickAccessRowProducts,
+                                    onProductClick = { product ->
+                                        beginManualProductSelection(product, null)
+                                    },
+                                    onOpenQuickProductDialog = {
                                         showQuickProductDialog = true
                                         currentMode = POSMode.MODAL
                                     }
-                                }
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
                         }
 
                         if (isLoading) {
@@ -2752,6 +2768,11 @@ fun QuickProductsRow(
     showPagination: Boolean,
     pageIndex: Int,
     pageCount: Int,
+    useSquareItems: Boolean,
+    squareColumns: Int,
+    squareTileSize: Dp,
+    squareTileSpacing: Dp,
+    squareMaxRows: Int,
     onPrevPage: () -> Unit,
     onNextPage: () -> Unit,
     products: List<Product>,
@@ -2759,13 +2780,6 @@ fun QuickProductsRow(
     onOpenQuickProductDialog: () -> Unit
 ) {
     val quickProducts = products
-    val rowCount = 3
-    val itemsPerRow = remember(quickProducts) {
-        ((quickProducts.size + rowCount - 1) / rowCount).coerceAtLeast(1)
-    }
-    val rows = remember(quickProducts, itemsPerRow) {
-        quickProducts.chunked(itemsPerRow).take(rowCount)
-    }
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -2839,53 +2853,106 @@ fun QuickProductsRow(
                 }
             }
 
-            rows.filter { it.isNotEmpty() }.forEach { rowProducts ->
-                val rowState = rememberLazyListState()
-                val hasOverflowToRight by remember(rowProducts, rowState) {
-                    derivedStateOf {
-                        val lastVisibleIndex = rowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                        lastVisibleIndex in 0 until rowProducts.lastIndex
+            if (useSquareItems) {
+                val gridHeight = (squareTileSize * squareMaxRows) +
+                    (squareTileSpacing * (squareMaxRows - 1))
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(squareColumns.coerceAtLeast(1)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(gridHeight),
+                    horizontalArrangement = Arrangement.spacedBy(squareTileSpacing),
+                    verticalArrangement = Arrangement.spacedBy(squareTileSpacing),
+                    userScrollEnabled = false
+                ) {
+                    items(quickProducts, key = { it.id }) { product ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            tonalElevation = 0.dp,
+                            shadowElevation = 0.dp,
+                            modifier = Modifier
+                                .size(squareTileSize)
+                                .clickable { onProductClick(product) }
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = product.name,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 3,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 12.sp
+                                )
+                            }
+                        }
                     }
                 }
+            } else {
+                val rowCount = 3
+                val itemsPerRow = remember(quickProducts) {
+                    ((quickProducts.size + rowCount - 1) / rowCount).coerceAtLeast(1)
+                }
+                val rows = remember(quickProducts, itemsPerRow) {
+                    quickProducts.chunked(itemsPerRow).take(rowCount)
+                }
 
-                Box(modifier = Modifier.fillMaxWidth())
-                {
-                    LazyRow(
-                        state = rowState,
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        contentPadding = PaddingValues(end = 22.dp)
-                    ) {
-                        items(rowProducts, key = { it.id }) { product ->
-                            AssistChip(
-                                onClick = { onProductClick(product) },
-                                colors = AssistChipDefaults.assistChipColors(
-                                    containerColor = MaterialTheme.colorScheme.surface,
-                                    labelColor = MaterialTheme.colorScheme.onSurface
-                                ),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                label = {
-                                    QuickProductNameLabel(product.name)
-                                }
-                            )
+                rows.filter { it.isNotEmpty() }.forEach { rowProducts ->
+                    val rowState = rememberLazyListState()
+                    val hasOverflowToRight by remember(rowProducts, rowState) {
+                        derivedStateOf {
+                            val lastVisibleIndex = rowState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                            lastVisibleIndex in 0 until rowProducts.lastIndex
                         }
                     }
 
-                    if (hasOverflowToRight) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.CenterEnd)
-                                .width(36.dp)
-                                .height(40.dp)
-                                .background(
-                                    Brush.horizontalGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                    Box(modifier = Modifier.fillMaxWidth())
+                    {
+                        LazyRow(
+                            state = rowState,
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            contentPadding = PaddingValues(end = 22.dp)
+                        ) {
+                            items(rowProducts, key = { it.id }) { product ->
+                                AssistChip(
+                                    onClick = { onProductClick(product) },
+                                    colors = AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.surface,
+                                        labelColor = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                    label = {
+                                        QuickProductNameLabel(product.name)
+                                    }
+                                )
+                            }
+                        }
+
+                        if (hasOverflowToRight) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .width(36.dp)
+                                    .height(40.dp)
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                                            )
                                         )
                                     )
-                                )
-                        )
+                            )
+                        }
                     }
                 }
             }

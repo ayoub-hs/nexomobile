@@ -11,10 +11,10 @@ android {
 
     defaultConfig {
         applicationId = "com.nexopos.erp"
-        minSdk = 33
+        minSdk = 29
         targetSdk = 36
         versionCode = 8
-        versionName = "8.0"
+        versionName = "8.1"
         vectorDrawables.useSupportLibrary = true
     }
 

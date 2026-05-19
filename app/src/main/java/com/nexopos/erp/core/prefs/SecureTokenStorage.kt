@@ -30,7 +30,8 @@ class SecureTokenStorage(context: Context) {
         private const val PREFS_NAME = "secure_prefs"
         private const val KEY_TOKEN = "auth_token"
         private const val KEY_TOKEN_EXPIRATION = "token_expiration"
-        private const val DEFAULT_TOKEN_LIFETIME_MS = 24 * 60 * 60 * 1000L // 24 hours
+        // 0 or negative means no expiration (offline-friendly).
+        private const val DEFAULT_TOKEN_LIFETIME_MS = 0L
     }
     
     private val _tokenFlow = MutableStateFlow("")
@@ -156,14 +157,15 @@ class SecureTokenStorage(context: Context) {
     }
     
     /**
-     * HIGH-001: Store token with expiration timestamp.
+     * HIGH-001: Store token with optional expiration timestamp.
+     * @param expirationMs Token lifetime in ms. 0 or negative disables expiration.
      * @throws SecurityException if encryption is not available
      */
     suspend fun setToken(token: String, expirationMs: Long = DEFAULT_TOKEN_LIFETIME_MS) = withContext(Dispatchers.IO) {
         val trimmedToken = token.trim()
         Log.d(TOKEN_LIFECYCLE_TAG, "Token saved to storage - key: $KEY_TOKEN, length: ${trimmedToken.length}, expirationMs: $expirationMs")
         val prefs = requireEncryption()
-        val expirationTime = System.currentTimeMillis() + expirationMs
+        val expirationTime = if (expirationMs <= 0L) 0L else System.currentTimeMillis() + expirationMs
         
         prefs.edit()
             .putString(KEY_TOKEN, trimmedToken)

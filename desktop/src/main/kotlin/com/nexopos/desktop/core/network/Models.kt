@@ -61,7 +61,9 @@ data class BootstrapSyncResponse(
     @Json(name = "payment_methods") val paymentMethods: List<PaymentMethod>? = null,
     @Json(name = "order_types") val orderTypes: List<OrderType>? = null,
     @Json(name = "sync_token") val syncToken: String? = null,
-    @Json(name = "server_time") val serverTime: String? = null
+    @Json(name = "server_time") val serverTime: String? = null,
+    @Json(name = "has_more") val hasMore: Boolean = false,
+    @Json(name = "next_cursor") val nextCursor: String? = null
 )
 
 @JsonClass(generateAdapter = true)

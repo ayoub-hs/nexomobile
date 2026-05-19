@@ -223,6 +223,7 @@
     <string name="common_cancel">Cancel</string>
     <string name="quantity_label">Quantity</string>
     <string name="quantity_error_positive">Enter a quantity greater than 0</string>
+    <string name="price_error_positive">Enter a unit price greater than or equal to 0</string>
     <string name="quantity_shortcut_1">1</string>
     <string name="quantity_shortcut_3">3</string>
     <string name="quantity_shortcut_5">5</string>

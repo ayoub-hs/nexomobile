@@ -27,6 +27,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +58,7 @@ import com.nexopos.erp.ui.theme.appColors
 import com.nexopos.erp.ui.theme.appRadii
 import com.nexopos.erp.ui.theme.appSpacing
 import java.util.Locale
+import kotlin.math.abs
 
 @Immutable
 data class QuantityDialogData(
@@ -84,7 +86,8 @@ data class QuantityDialogResult(
     val option: UnitOptionData,
     val quantity: Double,
     val useWholesale: Boolean,
-    val unitPrice: Double
+    val unitPrice: Double,
+    val isCustomPrice: Boolean
 )
 
 fun buildQuantityDialogData(
@@ -124,6 +127,7 @@ fun QuantityDialog(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val numberPattern = remember { Regex("^\\d*(?:\\.\\d{0,4})?$") }
+    val pricePattern = remember { Regex("^\\d*(?:\\.\\d{0,3})?$") }
     val scrollState = rememberScrollState()
 
     var quantityField by rememberSaveable(data.productId, stateSaver = TextFieldValue.Saver) {
@@ -135,7 +139,8 @@ fun QuantityDialog(
     var useWholesale by rememberSaveable(data.productId) {
         mutableStateOf(data.defaultWholesale)
     }
-    var isError by remember { mutableStateOf(false) }
+    var quantityError by remember { mutableStateOf(false) }
+    var priceError by remember { mutableStateOf(false) }
 
     val selectedOption = data.options.firstOrNull { it.unitQuantityId == selectedUnitQuantityId } ?: data.options.first()
     val hasSalePrice = hasSalePrice(selectedOption)
@@ -147,8 +152,40 @@ fun QuantityDialog(
         canToggleWholesale -> useWholesale
         else -> false
     }
-    val effectivePrice = effectiveUnitPrice(selectedOption, effectiveUseWholesale) ?: 0.0
+    val defaultUnitPrice = effectiveUnitPrice(selectedOption, effectiveUseWholesale) ?: 0.0
+    var unitPriceField by rememberSaveable(data.productId, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(""))
+    }
+    val editedUnitPrice = unitPriceField.text.toDoubleOrNull() ?: defaultUnitPrice
     val selectedUnitLabel = optionLabel(selectedOption)
+
+    LaunchedEffect(selectedUnitQuantityId, effectiveUseWholesale) {
+        val text = formatPriceValue(defaultUnitPrice)
+        unitPriceField = TextFieldValue(text, selection = TextRange(text.length))
+        priceError = false
+    }
+
+    val confirmSelection = {
+        val qty = quantityField.text.toDoubleOrNull()
+        val unitPrice = unitPriceField.text.toDoubleOrNull()
+        val hasValidQuantity = qty != null && qty.isFinite() && qty > 0.0
+        val hasValidUnitPrice = unitPrice != null && unitPrice.isFinite() && unitPrice >= 0.0
+        quantityError = !hasValidQuantity
+        priceError = !hasValidUnitPrice
+        if (hasValidQuantity && hasValidUnitPrice) {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+            onConfirm(
+                QuantityDialogResult(
+                    option = selectedOption,
+                    quantity = qty!!,
+                    useWholesale = effectiveUseWholesale,
+                    unitPrice = unitPrice!!,
+                    isCustomPrice = abs(unitPrice - defaultUnitPrice) > 0.0005
+                )
+            )
+        }
+    }
 
     AppDialog(
         onDismissRequest = onDismiss,
@@ -192,7 +229,7 @@ fun QuantityDialog(
                                     color = MaterialTheme.appColors.muted
                                 )
                                 Text(
-                                    text = formatCurrencyLabel(effectivePrice),
+                                    text = formatCurrencyLabel(editedUnitPrice),
                                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.appColors.text
                                 )
@@ -301,7 +338,8 @@ fun QuantityDialog(
                                                     !hasWholesalePrice(option) -> false
                                                     else -> useWholesale
                                                 }
-                                                isError = false
+                                                quantityError = false
+                                                priceError = false
                                             },
                                         shape = RoundedCornerShape(MaterialTheme.appRadii.medium),
                                         color = if (optionSelected) {
@@ -373,6 +411,42 @@ fun QuantityDialog(
                         verticalArrangement = Arrangement.spacedBy(MaterialTheme.appSpacing.xs)
                     ) {
                         Text(
+                            text = stringResource(R.string.custom_item_price_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.appColors.muted
+                        )
+                        AppTextField(
+                            value = unitPriceField,
+                            onValueChange = { newValue ->
+                                val cleaned = newValue.text.replace(',', '.')
+                                if (cleaned.isEmpty() || pricePattern.matches(cleaned)) {
+                                    val selection = TextRange(
+                                        newValue.selection.start.coerceIn(0, cleaned.length),
+                                        newValue.selection.end.coerceIn(0, cleaned.length)
+                                    )
+                                    unitPriceField = TextFieldValue(cleaned, selection, newValue.composition)
+                                    priceError = false
+                                }
+                            },
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Next
+                            ),
+                            singleLine = true,
+                            isError = priceError,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        unitPriceField = unitPriceField.copy(
+                                            selection = TextRange(0, unitPriceField.text.length)
+                                        )
+                                    }
+                                }
+                        )
+
+                        Text(
                             text = stringResource(R.string.quantity_label),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.appColors.muted
@@ -387,34 +461,16 @@ fun QuantityDialog(
                                         newValue.selection.end.coerceIn(0, cleaned.length)
                                     )
                                     quantityField = TextFieldValue(cleaned, selection, newValue.composition)
-                                    isError = false
+                                    quantityError = false
                                 }
                             },
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.Number,
                                 imeAction = ImeAction.Done
                             ),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    val qty = quantityField.text.toDoubleOrNull()
-                                    if (qty != null && qty > 0) {
-                                        keyboardController?.hide()
-                                        focusManager.clearFocus()
-                                        onConfirm(
-                                            QuantityDialogResult(
-                                                option = selectedOption,
-                                                quantity = qty,
-                                                useWholesale = effectiveUseWholesale,
-                                                unitPrice = effectivePrice
-                                            )
-                                        )
-                                    } else {
-                                        isError = true
-                                    }
-                                }
-                            ),
+                            keyboardActions = KeyboardActions(onDone = { confirmSelection() }),
                             singleLine = true,
-                            isError = isError,
+                            isError = quantityError,
                             trailingIcon = {
                                 Text(
                                     text = selectedUnitLabel,
@@ -456,7 +512,7 @@ fun QuantityDialog(
                                                 text = formattedValue,
                                                 selection = TextRange(formattedValue.length)
                                             )
-                                            isError = false
+                                            quantityError = false
                                         },
                                     shape = RoundedCornerShape(MaterialTheme.appRadii.small),
                                     color = if (shortcutSelected) {
@@ -484,9 +540,16 @@ fun QuantityDialog(
                     }
                 }
 
-                if (isError) {
+                if (quantityError) {
                     Text(
                         text = stringResource(R.string.quantity_error_positive),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.appColors.error
+                    )
+                }
+                if (priceError) {
+                    Text(
+                        text = stringResource(R.string.price_error_positive),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.appColors.error
                     )
@@ -508,23 +571,7 @@ fun QuantityDialog(
                     )
                 }
                 AppButtonPrimary(
-                    onClick = {
-                        val qty = quantityField.text.toDoubleOrNull()
-                        if (qty != null && qty > 0) {
-                            keyboardController?.hide()
-                            focusManager.clearFocus()
-                            onConfirm(
-                                QuantityDialogResult(
-                                    option = selectedOption,
-                                    quantity = qty,
-                                    useWholesale = effectiveUseWholesale,
-                                    unitPrice = effectivePrice
-                                )
-                            )
-                        } else {
-                            isError = true
-                        }
-                    },
+                    onClick = { confirmSelection() },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text(
@@ -571,3 +618,7 @@ private fun formatQuantityValue(value: Double): String {
 }
 
 private fun formatCurrencyLabel(value: Double): String = String.format(Locale.US, "%.3f DT", value)
+
+private fun formatPriceValue(value: Double): String {
+    return String.format(Locale.US, "%.3f", value).trimEnd('0').trimEnd('.')
+}

@@ -16,6 +16,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
@@ -156,28 +157,96 @@ class NexoApiClient(private val settings: AppSettings) {
     private var bootstrapCacheTime: Long = 0
     private val CACHE_TTL = 30000L // 30 seconds cache (refresh takes 5+ seconds)
     
+    private fun bootstrapEndpoint(cursor: String?): String {
+        val base = "api/mobile/sync/bootstrap"
+        if (cursor.isNullOrBlank()) return base
+        val encodedCursor = URLEncoder.encode(cursor, Charsets.UTF_8.name())
+        return "$base?cursor=$encodedCursor"
+    }
+
     /**
-     * Bootstrap sync - get all data at once (products, customers, payment methods)
-     * Cached for 5 seconds to avoid multiple calls during refresh
+     * Bootstrap sync - get all data at once (products, customers, payment methods).
+     * Follows pagination (has_more/next_cursor) to fetch all pages.
      */
     suspend fun bootstrapSync(forceRefresh: Boolean = false): Result<BootstrapSyncResponse> {
         val now = System.currentTimeMillis()
-        
+
         // Return cached if valid
         if (!forceRefresh && cachedBootstrap != null && (now - bootstrapCacheTime) < CACHE_TTL) {
             logDebug("[NexoApiClient] Using cached bootstrap data")
             return Result.success(cachedBootstrap!!)
         }
-        
+
         val adapter = getAdapter<BootstrapSyncResponse>()
-        val result = get("api/mobile/sync/bootstrap", adapter)
-        
-        if (result.isSuccess) {
-            cachedBootstrap = result.getOrNull()
-            bootstrapCacheTime = now
-        }
-        
-        return result
+
+        val allCategories = mutableListOf<MobileCategory>()
+        val allProducts = mutableListOf<MobileProduct>()
+        val allCustomers = mutableListOf<Customer>()
+        val allPaymentMethods = mutableListOf<PaymentMethod>()
+        val allOrderTypes = mutableListOf<OrderType>()
+        var syncToken: String? = null
+        var serverTime: String? = null
+
+        var cursor: String? = null
+        var hasMore: Boolean
+        var pageCount = 0
+
+        do {
+            pageCount++
+            if (pageCount > 1000) {
+                return Result.failure(Exception("Bootstrap sync pagination exceeded 1000 pages."))
+            }
+
+            val endpoint = bootstrapEndpoint(cursor)
+            val result = get(endpoint, adapter)
+            if (result.isFailure) {
+                return Result.failure(result.exceptionOrNull() ?: Exception("Failed to fetch bootstrap data"))
+            }
+
+            val response = result.getOrNull() ?: return Result.failure(Exception("Empty bootstrap response"))
+
+            if (response.categories?.isNotEmpty() == true) {
+                allCategories.addAll(response.categories)
+            }
+            if (response.products?.isNotEmpty() == true) {
+                allProducts.addAll(response.products)
+            }
+            if (response.customers?.isNotEmpty() == true) {
+                allCustomers.addAll(response.customers)
+            }
+            if (response.paymentMethods?.isNotEmpty() == true) {
+                allPaymentMethods.addAll(response.paymentMethods)
+            }
+            if (response.orderTypes?.isNotEmpty() == true) {
+                allOrderTypes.addAll(response.orderTypes)
+            }
+
+            if (syncToken == null) syncToken = response.syncToken
+            if (serverTime == null) serverTime = response.serverTime
+
+            hasMore = response.hasMore
+            cursor = response.nextCursor
+
+            if (hasMore && cursor.isNullOrBlank()) {
+                return Result.failure(Exception("Bootstrap sync response indicated more pages without a cursor."))
+            }
+        } while (hasMore && !cursor.isNullOrBlank())
+
+        val aggregated = BootstrapSyncResponse(
+            categories = allCategories,
+            products = allProducts,
+            customers = allCustomers,
+            paymentMethods = allPaymentMethods,
+            orderTypes = allOrderTypes,
+            syncToken = syncToken,
+            serverTime = serverTime,
+            hasMore = false,
+            nextCursor = null
+        )
+
+        cachedBootstrap = aggregated
+        bootstrapCacheTime = System.currentTimeMillis()
+        return Result.success(aggregated)
     }
     
     fun clearCache() {

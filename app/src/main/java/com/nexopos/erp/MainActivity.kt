@@ -298,6 +298,7 @@ private fun AppScaffold(windowSizeClass: WindowSizeClass) {
                         widthSizeClass = windowSizeClass.widthSizeClass,
                         navController = navController,
                         currentRegister = registerUiState.currentRegister,
+                        isOnline = isOnline,
                         onManageRegister = { registerHostVisible = true },
                         storeName = registerName,
                         pendingActionId = null,
@@ -329,6 +330,7 @@ private fun AppScaffold(windowSizeClass: WindowSizeClass) {
                         cartViewModel = cartViewModel,
                         widthSizeClass = windowSizeClass.widthSizeClass,
                         currentRegister = registerUiState.currentRegister,
+                        isOnline = isOnline,
                         onManageRegister = { registerHostVisible = true },
                         registerViewModel = registerViewModel
                     )
@@ -341,6 +343,7 @@ private fun AppScaffold(windowSizeClass: WindowSizeClass) {
                         widthSizeClass = windowSizeClass.widthSizeClass,
                         navController = navController,
                         currentRegister = registerUiState.currentRegister,
+                        isOnline = isOnline,
                         onManageRegister = { registerHostVisible = true },
                         storeName = registerName,
                         pendingActionId = null,

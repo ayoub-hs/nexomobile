@@ -373,6 +373,7 @@ fun SearchScreen(
     widthSizeClass: WindowWidthSizeClass,
     navController: NavController,
     currentRegister: Register?,
+    isOnline: Boolean = true,
     onManageRegister: () -> Unit,
     storeName: String = "",
     pendingActionId: String? = null,
@@ -547,7 +548,7 @@ fun SearchScreen(
                 clearDescription = stringResource(R.string.clear_search_description),
                 onClear = { query = "" }
             )
-            if (currentRegister == null) {
+            if (currentRegister == null && isOnline) {
                 MissingRegisterCard(
                     title = stringResource(R.string.register_search_warning_title),
                     message = stringResource(R.string.register_search_warning_message),
@@ -775,7 +776,7 @@ fun SearchScreen(
         QuantityDialog(
             data = data,
             onConfirm = { result ->
-                if (result.unitPrice <= 0.0) {
+                if (result.unitPrice < 0.0) {
                     Toast.makeText(
                         context,
                         context.getString(R.string.toast_no_price_for, data.name),
@@ -792,8 +793,8 @@ fun SearchScreen(
                         quantity = result.quantity,
                         salePrice = result.option.salePrice?.takeIf { it > 0.0 },
                         wholesalePriceWithTax = result.option.wholesalePriceWithTax?.takeIf { it > 0.0 },
-                        useWholesale = result.useWholesale,
-                        isCustomPrice = false,
+                        useWholesale = if (result.isCustomPrice) false else result.useWholesale,
+                        isCustomPrice = result.isCustomPrice,
                         containerLink = result.option.containerLink,
                         hasContainerMetadata = result.option.containerLink != null
                     )

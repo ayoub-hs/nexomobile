@@ -91,6 +91,7 @@
     <string name="common_cancel">Annuler</string>
     <string name="quantity_label">Quantité</string>
     <string name="quantity_error_positive">Saisissez une quantité supérieure à 0</string>
+    <string name="price_error_positive">Saisissez un prix unitaire supérieur à 0</string>
     <string name="quantity_shortcut_1">1</string>
     <string name="quantity_shortcut_3">3</string>
     <string name="quantity_shortcut_5">5</string>

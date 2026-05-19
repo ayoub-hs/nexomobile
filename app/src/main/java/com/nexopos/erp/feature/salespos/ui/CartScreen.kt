@@ -742,6 +742,7 @@ fun CheckoutScreen(
     cartViewModel: CartViewModel,
     widthSizeClass: WindowWidthSizeClass,
     currentRegister: Register?,
+    isOnline: Boolean = true,
     onManageRegister: () -> Unit,
     registerViewModel: RegisterViewModel
 ) {
@@ -799,10 +800,22 @@ fun CheckoutScreen(
 
                 CartEvent.OrderQueuedOffline -> {
                     pendingRegisterRefreshId = null
-                    snackbarHostState.showSnackbar(
-                        message = context.getString(R.string.checkout_offline_order_queued),
-                        withDismissAction = true
-                    )
+                    scope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = context.getString(R.string.checkout_offline_order_queued),
+                            withDismissAction = true
+                        )
+                    }
+                    val returnedToSell = navController.popBackStack(PosRoutes.SEARCH, inclusive = false)
+                    if (!returnedToSell) {
+                        navController.navigate(PosRoutes.SEARCH) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
                 }
 
                 is CartEvent.Error -> {
@@ -941,7 +954,7 @@ fun CheckoutScreen(
                 onManageRegister = onManageRegister,
                 modifier = Modifier.fillMaxWidth()
             )
-        } else {
+        } else if (isOnline) {
             MissingRegisterCard(
                 title = stringResource(R.string.register_checkout_warning_title),
                 message = stringResource(R.string.register_checkout_warning_message),

@@ -26,6 +26,7 @@ import com.nexopos.erp.core.repo.OrderQueueRepository
 import com.nexopos.erp.core.repo.OrderRepository
 import com.nexopos.erp.print.PrintUtil
 import com.nexopos.erp.core.sync.OfflineOrderSyncWorker
+import com.nexopos.shared.repo.OrderResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -39,6 +40,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -154,12 +156,7 @@ class CartViewModel(
 
     fun addProduct(product: Product, quantity: Double = 1.0) {
         // MED-001: Input validation
-        if (quantity <= 0.0 || quantity > MAX_QUANTITY) return
-        // MED-004: Cart size limit
-        if (_state.value.items.size >= MAX_CART_SIZE) {
-            viewModelScope.launch { _events.emit(CartEvent.Error(appContext.getString(R.string.error_cart_full))) }
-            return
-        }
+        if (!quantity.isFinite() || quantity <= 0.0 || quantity > MAX_QUANTITY) return
         val selectedUnit = product.unitQuantities?.firstOrNull()
         val salePrice = selectedUnit?.salePrice ?: 0.0
         val wholesalePrice = selectedUnit?.wholesalePriceWithTax
@@ -168,19 +165,30 @@ class CartViewModel(
             wholesalePrice != null && wholesalePrice > 0.0 -> wholesalePrice
             else -> 0.0
         }
-        if (initialPrice <= 0.0 || initialPrice > MAX_PRICE) return
+        if (!initialPrice.isFinite() || initialPrice <= 0.0 || initialPrice > MAX_PRICE) return
+        var cartFull = false
         _state.update { state ->
-            val existingIndex = state.items.indexOfFirst {
-                it.productId == product.id && it.unitQuantityId == selectedUnit?.id
+            val existingIndex = if (product.id == 0L) {
+                -1
+            } else {
+                state.items.indexOfFirst {
+                    it.productId == product.id && it.unitQuantityId == selectedUnit?.id
+                }
+            }
+            if (existingIndex < 0 && state.items.size >= MAX_CART_SIZE) {
+                cartFull = true
+                return@update state
             }
             val updatedItems = state.items.toMutableList()
             if (existingIndex >= 0) {
-                val existing = updatedItems[existingIndex]
-                updatedItems[existingIndex] = existing.copy(
+                val existing = updatedItems.removeAt(existingIndex)
+                val merged = existing.copy(
                     quantity = existing.quantity + quantity,
                     containerLink = existing.containerLink ?: selectedUnit?.containerLink,
                     hasContainerMetadata = existing.hasContainerMetadata || selectedUnit?.containerLink != null
                 )
+                // Keep the most recently added/updated line at the end of the cart.
+                updatedItems += merged
             } else {
                 updatedItems += CartItem(
                     key = UUID.randomUUID().toString(),
@@ -204,6 +212,9 @@ class CartViewModel(
                 error = null
             )
         }
+        if (cartFull) {
+            viewModelScope.launch { _events.emit(CartEvent.Error(appContext.getString(R.string.error_cart_full))) }
+        }
     }
     fun addProduct(
         productId: Long,
@@ -221,25 +232,35 @@ class CartViewModel(
         hasContainerMetadata: Boolean = containerLink != null
     ) {
         // MED-001: Input validation
-        if (unitPrice < 0.0 || unitPrice > MAX_PRICE) return
-        if (quantity <= 0.0 || quantity > MAX_QUANTITY) return
-        // MED-004: Cart size limit
-        if (_state.value.items.size >= MAX_CART_SIZE) {
-            viewModelScope.launch { _events.emit(CartEvent.Error(appContext.getString(R.string.error_cart_full))) }
-            return
-        }
+        if (!unitPrice.isFinite() || unitPrice < 0.0 || unitPrice > MAX_PRICE) return
+        if (!quantity.isFinite() || quantity <= 0.0 || quantity > MAX_QUANTITY) return
+        var cartFull = false
         _state.update { state ->
-            val existingIndex = state.items.indexOfFirst {
-                it.productId == productId && it.unitQuantityId == unitQuantityId
+            val existingIndex = when {
+                productId == 0L -> -1
+                isCustomPrice -> state.items.indexOfFirst {
+                    it.productId == productId &&
+                        it.unitQuantityId == unitQuantityId &&
+                        abs(it.unitPrice - unitPrice) <= 0.0005
+                }
+                else -> state.items.indexOfFirst {
+                    it.productId == productId && it.unitQuantityId == unitQuantityId
+                }
+            }
+            if (existingIndex < 0 && state.items.size >= MAX_CART_SIZE) {
+                cartFull = true
+                return@update state
             }
             val updatedItems = state.items.toMutableList()
             if (existingIndex >= 0) {
-                val existing = updatedItems[existingIndex]
-                updatedItems[existingIndex] = existing.copy(
+                val existing = updatedItems.removeAt(existingIndex)
+                val merged = existing.copy(
                     quantity = existing.quantity + quantity,
                     containerLink = existing.containerLink ?: containerLink,
                     hasContainerMetadata = existing.hasContainerMetadata || hasContainerMetadata
                 )
+                // Keep the most recently added/updated line at the end of the cart.
+                updatedItems += merged
             } else {
                 updatedItems += CartItem(
                     key = UUID.randomUUID().toString(),
@@ -263,6 +284,9 @@ class CartViewModel(
                 tendered = if (state.tenderedOverride) state.tendered else 0.0,
                 error = null
             )
+        }
+        if (cartFull) {
+            viewModelScope.launch { _events.emit(CartEvent.Error(appContext.getString(R.string.error_cart_full))) }
         }
     }
 
@@ -357,7 +381,7 @@ class CartViewModel(
     }
 
     fun updateItemPrice(key: String, price: Double) {
-        if (price <= 0.0) return
+        if (!price.isFinite() || price < 0.0) return
         _state.update { state ->
             val updatedItems = state.items.map { item ->
                 if (item.key == key) {
@@ -740,29 +764,35 @@ class CartViewModel(
         val editingServerOrderId = current.editingServerOrderId
         val isEditingSyncedOrder = editingServerOrderId != null
         
-        // Use PUT for synced orders, POST for new orders
-        val result = withContext(Dispatchers.IO) {
-            if (isEditingSyncedOrder) {
-                orderRepository.updateOrder(editingServerOrderId, request)
-            } else {
-                orderRepository.createOrder(request)
+        val online = isOnline()
+
+        // When offline, skip network call and queue immediately.
+        val result: Result<OrderResponse> = if (online) {
+            withContext(Dispatchers.IO) {
+                if (isEditingSyncedOrder) {
+                    orderRepository.updateOrder(editingServerOrderId, request)
+                } else {
+                    orderRepository.createOrder(request)
+                }
             }
+        } else {
+            Result.failure(IllegalStateException("Offline mode: queue order locally."))
         }
-        result.onFailure { throwable ->
-            val action = if (isEditingSyncedOrder) "Update" else "Create"
-            Log.e("CartViewModel", "$action order failed", throwable)
-            // Log response body for HTTP errors
-            if (throwable is retrofit2.HttpException) {
-                val errorBody = throwable.response()?.errorBody()?.string()
-                Log.e("CartViewModel", "$action order HTTP ${throwable.code()}: $errorBody")
+        if (online) {
+            result.onFailure { throwable ->
+                val action = if (isEditingSyncedOrder) "Update" else "Create"
+                Log.e("CartViewModel", "$action order failed", throwable)
+                // Log response body for HTTP errors
+                if (throwable is retrofit2.HttpException) {
+                    val errorBody = throwable.response()?.errorBody()?.string()
+                    Log.e("CartViewModel", "$action order HTTP ${throwable.code()}: $errorBody")
+                }
             }
         }
 
         var summary: OrderSummary? = null
         var offlineQueued = false
         var queueError: Throwable? = null
-
-        val online = isOnline()
 
         if (online && result.isSuccess) {
             // Convert OrderResponse to OrderSummary
